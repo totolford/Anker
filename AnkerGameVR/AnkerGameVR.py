@@ -1,8 +1,10 @@
 import json
 import os
+import shutil
 import subprocess
+import webbrowser
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from tkinter import ttk, filedialog, messagebox, simpledialog
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 LIBRARY_FILE = os.path.join(APP_DIR, "games.json")
@@ -16,27 +18,117 @@ DEFAULT_GAMES = [
     }
 ]
 
+def default_games():
+    return [dict(g) for g in DEFAULT_GAMES]
+
 def load_games():
     if os.path.exists(LIBRARY_FILE):
         try:
             with open(LIBRARY_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
+                data = json.load(f)
+            if isinstance(data, list):
+                games = [g for g in data if isinstance(g, dict) and g.get("name")]
+                for g in games:
+                    g.setdefault("exe", "")
+                    g.setdefault("vr", False)
+                    g.setdefault("notes", "")
+                return games
         except (OSError, json.JSONDecodeError):
-            return DEFAULT_GAMES.copy()
-    return DEFAULT_GAMES.copy()
+            pass
+    return default_games()
 
 def save_games(games):
-    with open(LIBRARY_FILE, "w", encoding="utf-8") as f:
+    tmp = LIBRARY_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(games, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, LIBRARY_FILE)
+
+ALVR_CANDIDATES = [
+    os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "ALVR", "ALVR Dashboard.exe"),
+    r"C:\Program Files\ALVR\ALVR Dashboard.exe",
+    r"C:\Program Files\ALVR\alvr_dashboard.exe",
+    os.path.join(APP_DIR, "alvr_streamer_windows", "ALVR Dashboard.exe"),
+]
+
+def find_alvr():
+    for p in ALVR_CANDIDATES:
+        if p and os.path.isfile(p):
+            return p
+    return shutil.which("ALVR Dashboard") or shutil.which("alvr_dashboard")
+
+SETTINGS_FILE = os.path.join(APP_DIR, "settings.json")
+
+# Profils par casque : réglages ALVR conseillés (à saisir dans ALVR > Video / Headset).
+PROFILES = {
+    "Meta Quest 1": {
+        "models": ["quest"],
+        "resolution": "Basse à moyenne (~1440 px de large par oeil)",
+        "bitrate": "100 Mb/s", "refresh": "72 Hz", "codec": "H.264",
+        "notes": "Matériel ancien : garde une résolution modeste. Wi-Fi 5 GHz requis.",
+    },
+    "Meta Quest 2": {
+        "models": ["quest 2"],
+        "resolution": "Moyenne (~1832 px de large par oeil)",
+        "bitrate": "150 Mb/s", "refresh": "90 Hz", "codec": "HEVC (H.265)",
+        "notes": "Wi-Fi 5/6 sur 5 GHz, routeur proche du casque.",
+    },
+    "Meta Quest 3": {
+        "models": ["quest 3", "quest 3s"],
+        "resolution": "Haute (~2064 px de large par oeil)",
+        "bitrate": "200 Mb/s", "refresh": "90 Hz (120 Hz si le PC suit)", "codec": "HEVC (H.265) ou AV1 si la carte graphique le gère",
+        "notes": "Idéal en Wi-Fi 6/6E dédié. Le Quest 3 gère le passthrough couleur.",
+    },
+}
+DEFAULT_PROFILE = "Meta Quest 3"
+
+def load_settings():
+    try:
+        with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict) and data.get("headset") in PROFILES:
+            return data
+    except (OSError, json.JSONDecodeError):
+        pass
+    return {"headset": DEFAULT_PROFILE}
+
+def save_settings(settings):
+    with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+        json.dump(settings, f, ensure_ascii=False, indent=2)
+
+def find_adb():
+    adb = shutil.which("adb")
+    if adb:
+        return adb
+    p = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Android", "Sdk", "platform-tools", "adb.exe")
+    return p if os.path.isfile(p) else None
+
+def detect_headset():
+    """Retourne (nom_profil, message). nom_profil vaut None si rien n'est détecté."""
+    adb = find_adb()
+    if not adb:
+        return None, "ADB introuvable. Lance INSTALLER.bat."
+    try:
+        r = subprocess.run([adb, "shell", "getprop", "ro.product.model"],
+                           capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return None, f"Erreur ADB : {e}"
+    model = r.stdout.strip().lower()
+    if r.returncode != 0 or not model:
+        return None, "Aucun casque détecté (câble USB, mode développeur, autorisation dans le casque)."
+    for name, prof in PROFILES.items():
+        if model in prof["models"]:
+            return name, f"Casque détecté : {r.stdout.strip()}"
+    return None, f"Appareil détecté ({r.stdout.strip()}) mais modèle inconnu."
 
 class Launcher(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("AnkerGame VR")
-        self.geometry("900x600")
-        self.minsize(760, 500)
+        self.geometry("900x680")
+        self.minsize(760, 560)
         self.configure(bg="#101522")
         self.games = load_games()
+        self.settings = load_settings()
         self._style()
         self._build()
         self.refresh()
@@ -59,6 +151,21 @@ class Launcher(tk.Tk):
         tk.Label(header, text="Ta bibliothèque de jeux, réunie au même endroit.",
                  bg="#101522", fg="#c4cee0", font=("Segoe UI", 11)).pack(anchor="w", pady=(3, 0))
 
+        hs = tk.Frame(header, bg="#101522")
+        hs.pack(fill="x", pady=(10, 0))
+        tk.Label(hs, text="Casque :", bg="#101522", fg="#c4cee0",
+                 font=("Segoe UI", 10, "bold")).pack(side="left")
+        self.headset_var = tk.StringVar(value=self.settings["headset"])
+        combo = ttk.Combobox(hs, textvariable=self.headset_var, values=list(PROFILES),
+                             state="readonly", width=16)
+        combo.pack(side="left", padx=8)
+        combo.bind("<<ComboboxSelected>>", lambda _e: self.set_headset(self.headset_var.get()))
+        ttk.Button(hs, text="Détecter", command=self.auto_detect).pack(side="left")
+        self.profile_info = tk.Label(header, text="", bg="#101522", fg="#9eabc2",
+                                     font=("Segoe UI", 9), anchor="w", justify="left", wraplength=840)
+        self.profile_info.pack(fill="x", pady=(6, 0))
+        self.update_profile_info()
+
         panel = tk.Frame(self, bg="#172238", highlightbackground="#2d4162",
                          highlightthickness=1)
         panel.pack(fill="both", expand=True, padx=26, pady=15)
@@ -79,12 +186,15 @@ class Launcher(tk.Tk):
         self.table.column("path", width=380)
         self.table.pack(fill="both", expand=True, padx=16, pady=(0, 12))
         self.table.bind("<<TreeviewSelect>>", self.show_details)
+        self.table.bind("<Double-1>", lambda _e: self.launch())
 
         actions = tk.Frame(panel, bg="#172238")
         actions.pack(fill="x", padx=16, pady=(0, 16))
         ttk.Button(actions, text="Lancer le jeu sélectionné", command=self.launch).pack(side="left")
         ttk.Button(actions, text="Modifier", command=self.edit_game).pack(side="left", padx=8)
         ttk.Button(actions, text="Supprimer", command=self.delete_game).pack(side="left")
+        ttk.Button(actions, text="Ouvrir ALVR", command=self.open_alvr).pack(side="right")
+        ttk.Button(actions, text="Installer APK sur Quest", command=self.install_apk).pack(side="right", padx=8)
 
         self.details = tk.Label(panel, text="Sélectionne un jeu pour afficher ses informations.",
                                 bg="#172238", fg="#bdc9dc", anchor="w",
@@ -136,14 +246,20 @@ class Launcher(tk.Tk):
         if i is None:
             messagebox.showinfo("AnkerGame VR", "Sélectionne d'abord un jeu.")
             return
+        g = self.games[i]
+        name = simpledialog.askstring("Nom du jeu", "Nom :", initialvalue=g["name"], parent=self)
+        if name and name.strip():
+            g["name"] = name.strip()
         path = filedialog.askopenfilename(
-            title="Choisir le fichier .exe du jeu",
+            title="Choisir le fichier .exe du jeu (Annuler = garder l'actuel)",
             filetypes=[("Applications Windows", "*.exe"), ("Tous les fichiers", "*.*")]
         )
         if path:
-            self.games[i]["exe"] = path
-            save_games(self.games)
-            self.refresh()
+            g["exe"] = path
+        g["vr"] = messagebox.askyesno("Compatibilité VR", "Ce jeu a-t-il un mode VR natif ?", initialvalue="yes" if g.get("vr") else "no")
+        save_games(self.games)
+        self.refresh()
+        self.table.selection_set(str(i))
 
     def delete_game(self):
         i = self.selected_index()
@@ -154,6 +270,57 @@ class Launcher(tk.Tk):
             save_games(self.games)
             self.refresh()
             self.details.config(text="Jeu retiré de la bibliothèque.")
+
+    def update_profile_info(self):
+        p = PROFILES[self.settings["headset"]]
+        self.profile_info.config(text=(
+            f"Réglages ALVR conseillés : résolution {p['resolution']} · débit {p['bitrate']} · "
+            f"{p['refresh']} · codec {p['codec']}.  {p['notes']}"))
+
+    def set_headset(self, name):
+        if name in PROFILES:
+            self.settings["headset"] = name
+            self.headset_var.set(name)
+            save_settings(self.settings)
+            self.update_profile_info()
+
+    def auto_detect(self):
+        name, msg = detect_headset()
+        if name:
+            self.set_headset(name)
+        self.status.config(text=msg)
+
+    def open_alvr(self):
+        exe = find_alvr()
+        if not exe:
+            if messagebox.askyesno("ALVR introuvable",
+                                   "ALVR n'est pas installé.\n\nOuvrir la page de téléchargement (GitHub) ?"):
+                webbrowser.open("https://github.com/alvr-org/ALVR/releases")
+            return
+        try:
+            subprocess.Popen([exe], cwd=os.path.dirname(exe))
+            self.status.config(text="ALVR lancé. Ouvre le client ALVR sur le Quest pour te connecter.")
+        except OSError as e:
+            messagebox.showerror("Erreur de lancement", str(e))
+
+    def install_apk(self):
+        adb = find_adb()
+        if not adb:
+            messagebox.showwarning("ADB introuvable", "Lance INSTALLER.bat, puis branche le casque en mode développeur.")
+            return
+        alvr_dir = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "ALVR")
+        apk = filedialog.askopenfilename(title="Choisir l'APK à installer (ex. client ALVR)",
+                                         initialdir=alvr_dir if os.path.isdir(alvr_dir) else None,
+                                         filetypes=[("APK Android", "*.apk")])
+        if not apk:
+            return
+        try:
+            r = subprocess.run([adb, "install", "-r", apk], capture_output=True, text=True, timeout=180)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            messagebox.showerror("Erreur ADB", str(e))
+            return
+        out = (r.stdout + r.stderr).strip()
+        (messagebox.showinfo if r.returncode == 0 else messagebox.showerror)("Installation APK", out or "Terminé.")
 
     def launch(self):
         i = self.selected_index()

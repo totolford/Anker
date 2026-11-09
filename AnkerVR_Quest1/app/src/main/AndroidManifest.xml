@@ -7,6 +7,7 @@
         android:label="AnkerVR"
         android:theme="@android:style/Theme.Material.NoActionBar"
         android:usesCleartextTraffic="true">
+        <meta-data android:name="com.oculus.supportedDevices" android:value="quest|quest2|quest3" />
         <activity
             android:name=".MainActivity"
             android:screenOrientation="landscape"
