@@ -2,11 +2,16 @@ import json
 import os
 import shutil
 import subprocess
+import sys
+import queue
+import threading
 import webbrowser
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, APP_DIR)
+import vr_play  # noqa: E402
 LIBRARY_FILE = os.path.join(APP_DIR, "games.json")
 
 DEFAULT_GAMES = [
@@ -129,6 +134,7 @@ class Launcher(tk.Tk):
         self.configure(bg="#101522")
         self.games = load_games()
         self.settings = load_settings()
+        self.vr_busy = False
         self._style()
         self._build()
         self.refresh()
@@ -190,11 +196,13 @@ class Launcher(tk.Tk):
 
         actions = tk.Frame(panel, bg="#172238")
         actions.pack(fill="x", padx=16, pady=(0, 16))
-        ttk.Button(actions, text="Lancer le jeu sélectionné", command=self.launch).pack(side="left")
+        ttk.Button(actions, text="Jouer en VR", command=self.play_vr).pack(side="left")
+        ttk.Button(actions, text="Lancer (normal)", command=self.launch).pack(side="left", padx=8)
         ttk.Button(actions, text="Modifier", command=self.edit_game).pack(side="left", padx=8)
         ttk.Button(actions, text="Supprimer", command=self.delete_game).pack(side="left")
         ttk.Button(actions, text="Ouvrir ALVR", command=self.open_alvr).pack(side="right")
         ttk.Button(actions, text="Installer APK sur Quest", command=self.install_apk).pack(side="right", padx=8)
+        ttk.Button(top, text="Importer Steam", command=self.import_steam).pack(side="right", padx=8)
 
         self.details = tk.Label(panel, text="Sélectionne un jeu pour afficher ses informations.",
                                 bg="#172238", fg="#bdc9dc", anchor="w",
@@ -322,6 +330,51 @@ class Launcher(tk.Tk):
         out = (r.stdout + r.stderr).strip()
         (messagebox.showinfo if r.returncode == 0 else messagebox.showerror)("Installation APK", out or "Terminé.")
 
+    def import_steam(self):
+        found = vr_play.scan_steam_games()
+        if not found:
+            messagebox.showinfo("Steam", "Aucun jeu Steam installé trouvé.")
+            return
+        known = {g.get("appid") for g in self.games if g.get("appid")}
+        new = [g for g in found if g["appid"] not in known]
+        for g in new:
+            self.games.append({"name": g["name"], "exe": "", "appid": g["appid"],
+                               "folder": g["folder"], "vr": False, "notes": "Importé depuis Steam."})
+        save_games(self.games)
+        self.refresh()
+        self.status.config(text=f"{len(new)} jeu(x) Steam importé(s).")
+
+    def play_vr(self):
+        i = self.selected_index()
+        if i is None:
+            messagebox.showinfo("AnkerGame VR", "Sélectionne un jeu.")
+            return
+        game = self.games[i]
+        if self.vr_busy:
+            return
+        self.vr_busy = True
+        answers = queue.Queue()
+
+        def ask(title, msg):  # appelé depuis le thread : on délègue l'affichage au thread Tk
+            self.after(0, lambda: answers.put(messagebox.askyesno(title, msg)))
+            return answers.get()
+
+        def log(msg):
+            self.after(0, lambda: self.status.config(text=msg))
+
+        def work():
+            try:
+                result = vr_play.play_vr(game, log, ask)
+            except Exception as e:
+                result = f"Erreur : {e}"
+            def done():
+                self.vr_busy = False
+                self.status.config(text=result)
+                messagebox.showinfo("AnkerGame VR", result)
+            self.after(0, done)
+
+        threading.Thread(target=work, daemon=True).start()
+
     def launch(self):
         i = self.selected_index()
         if i is None:
@@ -329,6 +382,10 @@ class Launcher(tk.Tk):
             return
         game = self.games[i]
         exe = game.get("exe", "")
+        if game.get("appid") and not exe:
+            os.startfile(f"steam://rungameid/{game['appid']}")
+            self.status.config(text=f"Lancement Steam demandé : {game['name']}")
+            return
         if not exe or not os.path.isfile(exe):
             messagebox.showwarning(
                 "Fichier du jeu manquant",
