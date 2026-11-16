@@ -180,6 +180,8 @@ class Launcher(tk.Tk):
         top.pack(fill="x", padx=16, pady=14)
         tk.Label(top, text="MES JEUX", bg="#172238", fg="white",
                  font=("Segoe UI", 14, "bold")).pack(side="left")
+        ttk.Button(top, text="Retirer un jeu", command=self.delete_game).pack(side="right")
+        ttk.Button(top, text="Modifier", command=self.edit_game).pack(side="right", padx=8)
         ttk.Button(top, text="+ Ajouter un jeu", command=self.add_game).pack(side="right")
 
         columns = ("name", "vr", "path")
@@ -198,11 +200,9 @@ class Launcher(tk.Tk):
         actions.pack(fill="x", padx=16, pady=(0, 16))
         ttk.Button(actions, text="Jouer en VR", command=self.play_vr).pack(side="left")
         ttk.Button(actions, text="Lancer (normal)", command=self.launch).pack(side="left", padx=8)
-        ttk.Button(actions, text="Modifier", command=self.edit_game).pack(side="left", padx=8)
-        ttk.Button(actions, text="Supprimer", command=self.delete_game).pack(side="left")
         ttk.Button(actions, text="Ouvrir ALVR", command=self.open_alvr).pack(side="right")
         ttk.Button(actions, text="Installer APK sur Quest", command=self.install_apk).pack(side="right", padx=8)
-        ttk.Button(top, text="Importer Steam", command=self.import_steam).pack(side="right", padx=8)
+        ttk.Button(actions, text="Importer Steam", command=self.import_steam).pack(side="right", padx=8)
 
         self.details = tk.Label(panel, text="Sélectionne un jeu pour afficher ses informations.",
                                 bg="#172238", fg="#bdc9dc", anchor="w",

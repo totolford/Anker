@@ -59,3 +59,11 @@ Ces valeurs sont des points de départ : saisis-les dans ALVR puis ajuste selon 
 ## Prérequis
 
 Windows 10/11 avec `winget`, une carte graphique compatible VR et une connexion Internet.
+
+## Affichage sur le PC et son
+
+Au clic sur **Jouer en VR**, le lanceur configure automatiquement (avec sauvegarde `.ankerbak`) :
+- **Miroir 16:9** : la fenêtre « VR View » de SteamVR montre sur le PC ce que voit le casque, comme une vidéo 360°.
+- **Son** : l'audio du jeu sort dans le casque **et** sur le PC (ALVR ne coupe plus le son du PC). Si ALVR n'a jamais été ouvert, lance-le une fois puis relance « Jouer en VR ».
+
+Ces réglages sont appliqués SteamVR et ALVR fermés ; sinon, ils le sont au prochain lancement.

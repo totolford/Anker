@@ -230,8 +230,63 @@ def github_vr_mods(name):
     return out
 
 
+# ----------------------------------------------- Miroir PC (16:9) et son partagé
+def _backup_and_write_json(path, data):
+    bak = path + ".ankerbak"
+    if not os.path.exists(bak):
+        shutil.copy2(path, bak)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=3)
+
+
+def configure_mirror(log):
+    """SteamVR : ouvre la fenêtre « VR View » (vue plate 16:9 de ce que voit le casque).
+    À faire SteamVR fermé, sinon il réécrit son fichier à la fermeture."""
+    root = steam_path()
+    path = os.path.join(root, "config", "steamvr.vrsettings") if root else None
+    if not path or not os.path.isfile(path):
+        return
+    if find_pid("vrserver.exe"):
+        log("SteamVR déjà ouvert : affichage miroir non modifié (menu SteamVR > Afficher la vue VR).")
+        return
+    try:
+        data = json.load(open(path, encoding="utf-8"))
+        sv = data.setdefault("steamvr", {})
+        if sv.get("mirrorView") != 1:
+            sv["mirrorView"] = 1       # fenêtre « VR View » sur le PC
+            sv["mirrorViewEye"] = 1    # un seul oeil, image non déformée
+            _backup_and_write_json(path, data)
+            log("Affichage miroir du casque activé sur le PC.")
+    except (OSError, ValueError) as e:
+        log(f"Miroir non configuré : {e}")
+
+
+def configure_alvr_audio(log):
+    """ALVR : garde le son du jeu sur le PC en plus du casque (désactive « mute when streaming »)."""
+    alvr_dir = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "ALVR")
+    cands = [os.path.join(alvr_dir, "session.json"),
+             os.path.join(os.environ.get("APPDATA", ""), "ALVR", "session.json")]
+    path = next((p for p in cands if os.path.isfile(p)), None)
+    if not path:
+        log("Réglage du son : lance ALVR une fois puis relance « Jouer en VR ».")
+        return
+    if find_pid("ALVR Dashboard.exe") or find_pid("vrserver.exe"):
+        return  # ALVR réécrit session.json : on ne touche pas pendant qu'il tourne
+    try:
+        data = json.load(open(path, encoding="utf-8"))
+        content = data["session_settings"]["audio"]["game_audio"]["content"]
+        if content.get("mute_when_streaming", {}).get("enabled", content.get("mute_when_streaming")) is not False:
+            content["mute_when_streaming"] = False
+            _backup_and_write_json(path, data)
+            log("Son du jeu : casque ET PC.")
+    except (OSError, ValueError, KeyError, TypeError):
+        log("Réglage du son non appliqué : règle « Mute audio on PC » sur Off dans ALVR > Audio.")
+
+
 # ------------------------------------------------------------------ VR stack
 def ensure_vr_stack(log):
+    configure_mirror(log)
+    configure_alvr_audio(log)
     alvr = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "ALVR", "ALVR Dashboard.exe")
     if find_pid("ALVR Dashboard.exe") is None:
         if os.path.isfile(alvr):

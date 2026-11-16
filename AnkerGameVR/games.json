@@ -4,5 +4,29 @@
     "exe": "",
     "vr": true,
     "notes": "Jeu VR natif. Ajoute le fichier .exe du jeu installé sur ton PC."
+  },
+  {
+    "name": "Crab Game",
+    "exe": "",
+    "appid": "1782210",
+    "folder": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Crab Game",
+    "vr": false,
+    "notes": "Importé depuis Steam."
+  },
+  {
+    "name": "Satisfactory",
+    "exe": "",
+    "appid": "526870",
+    "folder": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Satisfactory",
+    "vr": false,
+    "notes": "Importé depuis Steam."
+  },
+  {
+    "name": "SCP: Secret Laboratory",
+    "exe": "",
+    "appid": "700330",
+    "folder": "D:\\SteamLibrary\\steamapps\\common\\SCP Secret Laboratory",
+    "vr": false,
+    "notes": "Importé depuis Steam."
   }
 ]
