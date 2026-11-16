@@ -23,10 +23,11 @@ Le script installe ce qui manque et ignore ce qui est déjà présent :
 
 1. Sur le casque : active le **mode développeur**, branche-le en USB et accepte le débogage USB.
 2. Ouvre **AnkerGame VR** (raccourci bureau).
-3. Clique **Détecter** : le profil Quest 1, 2 ou 3 est choisi automatiquement.
-4. Clique **Installer APK sur Quest** et choisis `alvr_client_android.apk`.
-5. Clique **Ouvrir ALVR**, lance le client ALVR dans le casque et accepte la connexion.
-6. Clique **+ Ajouter un jeu**, choisis son `.exe`, puis double-clique dessus pour le lancer.
+3. Clique **Détecter le casque** : une fenêtre indique le résultat (ou ce qu'il faut corriger) et le profil Quest 1, 2 ou 3 est choisi automatiquement.
+4. Clique **Mettre à jour ALVR sur le casque** : le client ALVR de la même version que le serveur du PC est installé (ou mis à jour) sur le casque. Seule l'app ALVR est modifiée, jamais le système du casque. Si l'ancienne version est incompatible, une désinstallation est proposée.
+5. *(Optionnel)* **Connexion Wi-Fi** : avec le casque branché, laisse l'adresse vide pour activer l'ADB sans fil, puis débranche le câble.
+6. Clique **Ouvrir ALVR (PC)**, lance le client ALVR dans le casque (Bibliothèque > Sources inconnues) et accepte la connexion.
+7. Clique **+ Ajouter un jeu**, choisis son `.exe`, puis double-clique dessus pour le lancer.
 
 ## Profils de casque
 

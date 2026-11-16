@@ -12,6 +12,7 @@ from tkinter import ttk, filedialog, messagebox, simpledialog
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, APP_DIR)
 import vr_play  # noqa: E402
+import headset  # noqa: E402
 LIBRARY_FILE = os.path.join(APP_DIR, "games.json")
 
 DEFAULT_GAMES = [
@@ -100,44 +101,29 @@ def save_settings(settings):
     with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
         json.dump(settings, f, ensure_ascii=False, indent=2)
 
-def find_adb():
-    adb = shutil.which("adb")
-    if adb:
-        return adb
-    p = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Android", "Sdk", "platform-tools", "adb.exe")
-    return p if os.path.isfile(p) else None
-
-def detect_headset():
-    """Retourne (nom_profil, message). nom_profil vaut None si rien n'est détecté."""
-    adb = find_adb()
-    if not adb:
-        return None, "ADB introuvable. Lance INSTALLER.bat."
-    try:
-        r = subprocess.run([adb, "shell", "getprop", "ro.product.model"],
-                           capture_output=True, text=True, timeout=15)
-    except (OSError, subprocess.TimeoutExpired) as e:
-        return None, f"Erreur ADB : {e}"
-    model = r.stdout.strip().lower()
-    if r.returncode != 0 or not model:
-        return None, "Aucun casque détecté (câble USB, mode développeur, autorisation dans le casque)."
+def profile_for_model(model):
+    """Nom du profil correspondant au modèle ADB (ex. « Quest 3 »), ou None."""
+    model = model.strip().lower()
     for name, prof in PROFILES.items():
         if model in prof["models"]:
-            return name, f"Casque détecté : {r.stdout.strip()}"
-    return None, f"Appareil détecté ({r.stdout.strip()}) mais modèle inconnu."
+            return name
+    return None
 
 class Launcher(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("AnkerGame VR")
-        self.geometry("900x680")
-        self.minsize(760, 560)
+        self.geometry("1040x760")
+        self.minsize(960, 700)
         self.configure(bg="#101522")
         self.games = load_games()
         self.settings = load_settings()
         self.vr_busy = False
+        self.events = queue.Queue()
         self._style()
         self._build()
         self.refresh()
+        self._poll()
 
     def _style(self):
         style = ttk.Style(self)
@@ -163,10 +149,13 @@ class Launcher(tk.Tk):
                  font=("Segoe UI", 10, "bold")).pack(side="left")
         self.headset_var = tk.StringVar(value=self.settings["headset"])
         combo = ttk.Combobox(hs, textvariable=self.headset_var, values=list(PROFILES),
-                             state="readonly", width=16)
+                             state="readonly", width=14)
         combo.pack(side="left", padx=8)
         combo.bind("<<ComboboxSelected>>", lambda _e: self.set_headset(self.headset_var.get()))
-        ttk.Button(hs, text="Détecter", command=self.auto_detect).pack(side="left")
+        ttk.Button(hs, text="Détecter le casque", command=self.auto_detect).pack(side="left")
+        ttk.Button(hs, text="Mettre à jour ALVR sur le casque", command=self.update_headset).pack(side="left", padx=8)
+        ttk.Button(hs, text="Connexion Wi-Fi", command=self.wifi_connect).pack(side="left")
+        ttk.Button(hs, text="Ouvrir ALVR (PC)", command=self.open_alvr).pack(side="left", padx=8)
         self.profile_info = tk.Label(header, text="", bg="#101522", fg="#9eabc2",
                                      font=("Segoe UI", 9), anchor="w", justify="left", wraplength=840)
         self.profile_info.pack(fill="x", pady=(6, 0))
@@ -200,9 +189,7 @@ class Launcher(tk.Tk):
         actions.pack(fill="x", padx=16, pady=(0, 16))
         ttk.Button(actions, text="Jouer en VR", command=self.play_vr).pack(side="left")
         ttk.Button(actions, text="Lancer (normal)", command=self.launch).pack(side="left", padx=8)
-        ttk.Button(actions, text="Ouvrir ALVR", command=self.open_alvr).pack(side="right")
-        ttk.Button(actions, text="Installer APK sur Quest", command=self.install_apk).pack(side="right", padx=8)
-        ttk.Button(actions, text="Importer Steam", command=self.import_steam).pack(side="right", padx=8)
+        ttk.Button(actions, text="Importer mes jeux Steam", command=self.import_steam).pack(side="right")
 
         self.details = tk.Label(panel, text="Sélectionne un jeu pour afficher ses informations.",
                                 bg="#172238", fg="#bdc9dc", anchor="w",
@@ -292,11 +279,98 @@ class Launcher(tk.Tk):
             save_settings(self.settings)
             self.update_profile_info()
 
+    def ui(self, fn):
+        """Planifie fn() sur le thread Tk (sûr depuis un thread de travail)."""
+        self.events.put(fn)
+
+    def _poll(self):
+        try:
+            while True:
+                self.events.get_nowait()()
+        except queue.Empty:
+            pass
+        self.after(60, self._poll)
+
+    def run_task(self, work, title="AnkerGame VR"):
+        """Exécute work(log, ask) en arrière-plan (interface fluide) et affiche le résultat dans une fenêtre."""
+        if self.vr_busy:
+            messagebox.showinfo(title, "Une opération est déjà en cours, patiente un instant.")
+            return
+        self.vr_busy = True
+        answers = queue.Queue()
+
+        def ask(t, m):  # appelé depuis le thread : l'affichage est délégué au thread Tk
+            self.ui(lambda: answers.put(messagebox.askyesno(t, m)))
+            return answers.get()
+
+        def log(m):
+            self.ui(lambda: self.status.config(text=m))
+
+        def thread():
+            try:
+                result = work(log, ask) or "Terminé."
+            except Exception as e:
+                result = f"Erreur : {e}"
+
+            def done():
+                self.vr_busy = False
+                self.status.config(text=result.splitlines()[0])
+                messagebox.showinfo(title, result)
+            self.ui(done)
+
+        self.status.config(text="Opération en cours…")
+        threading.Thread(target=thread, daemon=True).start()
+
     def auto_detect(self):
-        name, msg = detect_headset()
-        if name:
-            self.set_headset(name)
-        self.status.config(text=msg)
+        def work(log, ask):
+            log("Recherche du casque…")
+            code, msg, model = headset.status()
+            if code != "ready":
+                return msg
+            prof = profile_for_model(model)
+            if prof:
+                self.ui(lambda: self.set_headset(prof))
+                return f"{msg}\nProfil appliqué : {prof}."
+            return f"{msg}\nModèle non reconnu : le profil reste inchangé."
+        self.run_task(work, "Détection du casque")
+
+    def update_headset(self):
+        if not messagebox.askyesno(
+                "Mettre à jour ALVR sur le casque",
+                "Installer (ou mettre à jour) le client ALVR sur le casque connecté ?\n\n"
+                "Seule l'application ALVR est modifiée : le système du casque n'est pas touché."):
+            return
+        self.run_task(headset.update_client, "Mise à jour d'ALVR sur le casque")
+
+    def wifi_connect(self):
+        ip = simpledialog.askstring(
+            "Connexion Wi-Fi",
+            "Adresse IP du casque (Paramètres > Wi-Fi).\n\n"
+            "Casque branché en USB ? Laisse vide : l'ADB sans fil sera activé automatiquement.",
+            initialvalue=self.settings.get("headset_ip", ""), parent=self)
+        if ip is None:
+            return
+        ip = ip.strip()
+
+        def work(log, ask):
+            if not ip:
+                log("Activation de l'ADB sans fil…")
+                ok, found, msg = headset.enable_wifi_adb()
+                if ok and found:
+                    self.settings["headset_ip"] = found
+                    save_settings(self.settings)
+                    ok, out = headset.connect_wifi(found)
+                    msg += f"\n{out}\n\nTu peux débrancher le câble." if ok else f"\nConnexion : {out}"
+                return msg
+            log(f"Connexion à {ip}…")
+            ok, out = headset.connect_wifi(ip)
+            if ok:
+                self.settings["headset_ip"] = ip
+                save_settings(self.settings)
+                return f"Connecté en Wi-Fi : {out}"
+            return (f"Connexion impossible : {out}\n\nL'ADB sans fil doit d'abord être activé : "
+                    "branche le casque en USB, puis réessaie avec l'adresse vide.")
+        self.run_task(work, "Connexion Wi-Fi")
 
     def open_alvr(self):
         exe = find_alvr()
@@ -310,25 +384,6 @@ class Launcher(tk.Tk):
             self.status.config(text="ALVR lancé. Ouvre le client ALVR sur le Quest pour te connecter.")
         except OSError as e:
             messagebox.showerror("Erreur de lancement", str(e))
-
-    def install_apk(self):
-        adb = find_adb()
-        if not adb:
-            messagebox.showwarning("ADB introuvable", "Lance INSTALLER.bat, puis branche le casque en mode développeur.")
-            return
-        alvr_dir = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "ALVR")
-        apk = filedialog.askopenfilename(title="Choisir l'APK à installer (ex. client ALVR)",
-                                         initialdir=alvr_dir if os.path.isdir(alvr_dir) else None,
-                                         filetypes=[("APK Android", "*.apk")])
-        if not apk:
-            return
-        try:
-            r = subprocess.run([adb, "install", "-r", apk], capture_output=True, text=True, timeout=180)
-        except (OSError, subprocess.TimeoutExpired) as e:
-            messagebox.showerror("Erreur ADB", str(e))
-            return
-        out = (r.stdout + r.stderr).strip()
-        (messagebox.showinfo if r.returncode == 0 else messagebox.showerror)("Installation APK", out or "Terminé.")
 
     def import_steam(self):
         found = vr_play.scan_steam_games()
@@ -350,30 +405,7 @@ class Launcher(tk.Tk):
             messagebox.showinfo("AnkerGame VR", "Sélectionne un jeu.")
             return
         game = self.games[i]
-        if self.vr_busy:
-            return
-        self.vr_busy = True
-        answers = queue.Queue()
-
-        def ask(title, msg):  # appelé depuis le thread : on délègue l'affichage au thread Tk
-            self.after(0, lambda: answers.put(messagebox.askyesno(title, msg)))
-            return answers.get()
-
-        def log(msg):
-            self.after(0, lambda: self.status.config(text=msg))
-
-        def work():
-            try:
-                result = vr_play.play_vr(game, log, ask)
-            except Exception as e:
-                result = f"Erreur : {e}"
-            def done():
-                self.vr_busy = False
-                self.status.config(text=result)
-                messagebox.showinfo("AnkerGame VR", result)
-            self.after(0, done)
-
-        threading.Thread(target=work, daemon=True).start()
+        self.run_task(lambda log, ask: vr_play.play_vr(game, log, ask), "Jouer en VR")
 
     def launch(self):
         i = self.selected_index()

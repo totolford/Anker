@@ -83,6 +83,7 @@ Run-Step 'ALVR (serveur PC + client Quest)' {
     Remove-Item $zip, $tmp -Recurse -Force
 
     Invoke-WebRequest $apkAsset.browser_download_url -OutFile (Join-Path $AlvrDir 'alvr_client_android.apk')
+    Set-Content -Path (Join-Path $AlvrDir 'client_version.txt') -Value $rel.tag_name -NoNewline
 
     if (-not (Test-Path (Join-Path $AlvrDir 'ALVR Dashboard.exe'))) { throw "ALVR Dashboard.exe introuvable dans $AlvrDir" }
     Ok "ALVR $($rel.tag_name) installe dans $AlvrDir"
@@ -110,8 +111,8 @@ Write-Host @"
 
 PROCHAINES ETAPES
   1. Branche ton Quest en USB, active le mode developpeur et accepte le debogage USB.
-  2. Ouvre AnkerGame VR (raccourci bureau), clique "Detecter" puis
-     "Installer APK sur Quest" et choisis alvr_client_android.apk (dossier ALVR deja ouvert).
+  2. Ouvre AnkerGame VR (raccourci bureau), clique "Detecter le casque" puis
+     "Mettre a jour ALVR sur le casque" (installe le bon client automatiquement).
   3. Clique "Ouvrir ALVR", lance le client ALVR dans le casque et accepte la connexion.
 "@
 if ($Results.Values -contains 'ECHEC') { exit 1 }
