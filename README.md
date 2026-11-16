@@ -68,3 +68,13 @@ Au clic sur **Jouer en VR**, le lanceur configure automatiquement (avec sauvegar
 - **Son** : l'audio du jeu sort dans le casque **et** sur le PC (ALVR ne coupe plus le son du PC). Si ALVR n'a jamais été ouvert, lance-le une fois puis relance « Jouer en VR ».
 
 Ces réglages sont appliqués SteamVR et ALVR fermés ; sinon, ils le sont au prochain lancement.
+
+## Jeux achetés hors Steam (GOG, site de l'éditeur…)
+
+Ajoute le jeu avec **+ Ajouter un jeu** (son `.exe`). Au clic sur **Jouer en VR**, le lanceur regarde les fichiers du jeu :
+- s'il contient des bibliothèques VR (OpenVR, Oculus, OpenXR), c'est un **jeu VR natif** : il est lancé tel quel, **sans aucun mod**, une fois SteamVR prêt ;
+- sinon, s'il tourne sur Unreal Engine, le mod UEVR est proposé (solo uniquement).
+
+Si le jeu vient du Meta Store (dossier `Oculus\Software`), il utilise le runtime Oculus : connecte le casque avec l'app Meta Quest Link (câble Link ou Air Link) au lieu d'ALVR.
+
+> Utilise uniquement des jeux que tu possèdes légalement.

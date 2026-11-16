@@ -132,6 +132,24 @@ def find_unreal_exe(folder):
     return None
 
 
+NATIVE_VR_FILES = ("openvr_api.dll", "ovrplugin.dll", "libovrrt64", "openxr_loader.dll")
+
+
+def looks_native_vr(folder):
+    """Vrai si le dossier du jeu contient des bibliothèques VR (OpenVR, Oculus, OpenXR) :
+    c'est un jeu VR natif, qui ne doit surtout pas recevoir un mod d'injection."""
+    if not folder or not os.path.isdir(folder):
+        return False
+    base = folder.rstrip("\\/").count(os.sep)
+    for root, dirs, files in os.walk(folder):
+        if root.count(os.sep) - base > 7:
+            dirs[:] = []
+            continue
+        if any(f.lower().startswith(NATIVE_VR_FILES) for f in files):
+            return True
+    return False
+
+
 def has_anticheat(folder):
     for _root, dirs, files in os.walk(folder):
         if any(a.lower() in n.lower() for a in ANTICHEAT for n in dirs + files):
@@ -346,6 +364,16 @@ def play_vr(game, log, ask):
             os.startfile(f"steam://install/{vr_id}")
             return f"Installation de « {vr_name} » demandée dans Steam. Relance ensuite « Jouer en VR »."
         return "Annulé."
+
+    exe = game.get("exe", "")
+    if exe and os.path.isfile(exe) and looks_native_vr(folder):
+        # Jeu VR natif hors Steam (GOG, site de l'éditeur…) : lancement direct, sans injection.
+        if not ensure_vr_stack(log):
+            return NO_VR_MSG
+        log("Jeu VR natif détecté : lancement direct…")
+        subprocess.Popen([exe], cwd=os.path.dirname(exe))
+        return ("Jeu VR natif lancé (aucun mod injecté). Mets le casque : le jeu utilise SteamVR/ALVR. "
+                "Si le jeu exige un autre lanceur (Meta, GOG Galaxy), ouvre-le d'abord.")
 
     shipping = find_unreal_exe(folder)
     if shipping:
