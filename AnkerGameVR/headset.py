@@ -14,6 +14,7 @@ ALVR_DIR = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")),
 APK_PATH = os.path.join(ALVR_DIR, "alvr_client_android.apk")
 VERSION_FILE = os.path.join(ALVR_DIR, "client_version.txt")
 UA = {"User-Agent": "AnkerGameVR"}
+MIN_SDK = 26  # minSdkVersion du client ALVR 20.x (Android 8.0), vérifié sur l'APK v20.14.1
 
 # état -> (message pour l'utilisateur)
 GUIDE = {
@@ -133,6 +134,14 @@ def update_client(log, ask):
     code, msg, model = status()
     if code != "ready":
         return msg
+    sdk_txt = adb(["shell", "getprop", "ro.build.version.sdk"]).stdout.strip()
+    abi = adb(["shell", "getprop", "ro.product.cpu.abi"]).stdout.strip()
+    if sdk_txt.isdigit() and int(sdk_txt) < MIN_SDK:
+        return (f"Le logiciel du casque est trop ancien (Android API {sdk_txt}, minimum {MIN_SDK}).\n\n"
+                "Mets le casque à jour (Paramètres > Système > Mise à jour logicielle), connecté au Wi-Fi, "
+                "puis recommence.")
+    if abi and "arm64" not in abi:
+        return f"Processeur non pris en charge par ALVR ({abi})."
     log(f"{model} : préparation du client ALVR…")
     apk = ensure_apk(log)
     before = alvr_packages()
@@ -150,6 +159,9 @@ def update_client(log, ask):
                 adb(["uninstall", pkg])
             r = adb(["install", apk], timeout=300)
             out = (r.stdout + r.stderr).strip()
+        if "OLDER_SDK" in out:
+            return ("Ce casque est trop ancien pour cette version d'ALVR. Mets le casque à jour "
+                    "(Paramètres > Système > Mise à jour logicielle), puis recommence.")
         if "Success" not in out:
             return f"Installation échouée : {out or 'raison inconnue'}"
     after = alvr_packages()
