@@ -38,7 +38,7 @@ def _get_json(url, timeout=20):
 def _norm_words(name):
     generic = {"the", "of", "vr", "edition", "special", "remastered", "definitive", "complete",
                "goty", "game", "year", "enhanced", "deluxe", "anniversary", "legendary"}
-    return set(re.findall(r"[a-z0-9]+", name.lower())) - generic
+    return set(re.findall(r"[a-z0-9]+", name.lower().replace("'", "").replace("’", ""))) - generic
 
 
 # ---------------------------------------------------------------- Steam locale
@@ -297,16 +297,38 @@ def ensure_vr_stack(log):
     if find_pid("vrserver.exe") is None:
         log("Démarrage de SteamVR…")
         os.startfile(f"steam://rungameid/{STEAMVR_APPID}")
-        for _ in range(45):
+        for _ in range(60):
             time.sleep(1)
             if find_pid("vrserver.exe"):
                 break
-    log("Mets le casque, ouvre le client ALVR et accepte la connexion si ce n'est pas déjà fait.")
+    up = find_pid("vrserver.exe") is not None
+    if up:
+        log("Mets le casque, ouvre le client ALVR et accepte la connexion si ce n'est pas déjà fait.")
+    return up
+
+
+NO_VR_MSG = ("SteamVR n'a pas démarré : le jeu n'a PAS été lancé (sans VR prête, un jeu VR peut planter).\n\n"
+             "Vérifie : SteamVR installé dans Steam, ALVR ouvert, casque connecté (client ALVR lancé dans le casque).")
+
+
+def link_steam_game(game):
+    """Relie une fiche ajoutée à la main (.exe) au jeu Steam installé : retrouve son appid et son vrai nom."""
+    if game.get("appid") or not game.get("exe"):
+        return
+    exe = os.path.normcase(os.path.abspath(game["exe"]))
+    for g in scan_steam_games():
+        folder = os.path.normcase(os.path.abspath(g["folder"]))
+        if exe.startswith(folder + os.sep):
+            game["appid"], game["folder"], game["steam_name"] = g["appid"], g["folder"], g["name"]
+            return
 
 
 # --------------------------------------------------------------- Orchestration
 def play_vr(game, log, ask):
     """Lance `game` en VR. `ask(titre, message)` -> bool pour confirmer. Retourne un message final."""
+    link_steam_game(game)
+    if game.get("steam_name"):
+        game["name"] = game["steam_name"]
     folder = game.get("folder") or (os.path.dirname(game["exe"]) if game.get("exe") else "")
     appid = game.get("appid")
 
@@ -314,9 +336,10 @@ def play_vr(game, log, ask):
     off = find_official_vr(game)
     if off:
         vr_id, vr_name, same = off
-        ensure_vr_stack(log)
         installed = any(g["appid"] == vr_id for g in scan_steam_games())
         if installed or same:
+            if not ensure_vr_stack(log):
+                return NO_VR_MSG
             os.startfile(f"steam://rungameid/{vr_id}")
             return f"Lancement VR officiel : {vr_name}."
         if ask("Version VR officielle", f"« {vr_name} » existe sur Steam.\nL'installer maintenant (si tu la possèdes ou veux l'acheter) ?"):
@@ -334,7 +357,8 @@ def play_vr(game, log, ask):
                    "À utiliser en solo uniquement. Continuer ?"):
             return "Annulé."
         uevr = ensure_uevr(log)
-        ensure_vr_stack(log)
+        if not ensure_vr_stack(log):
+            return NO_VR_MSG
         log("Lancement du jeu…")
         if appid:
             os.startfile(f"steam://rungameid/{appid}")

@@ -405,7 +405,11 @@ class Launcher(tk.Tk):
             messagebox.showinfo("AnkerGame VR", "Sélectionne un jeu.")
             return
         game = self.games[i]
-        self.run_task(lambda log, ask: vr_play.play_vr(game, log, ask), "Jouer en VR")
+        def work(log, ask):
+            result = vr_play.play_vr(game, log, ask)
+            self.ui(lambda: save_games(self.games))  # mémorise le lien Steam retrouvé
+            return result
+        self.run_task(work, "Jouer en VR")
 
     def launch(self):
         i = self.selected_index()
